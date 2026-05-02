@@ -1,23 +1,17 @@
-from fastapi import FastAPI, Request, Query
+from telegram.ext import ApplicationBuilder, MessageHandler, filters
 from src.bot.handlers import handle_message
+from dotenv import load_dotenv
 import os
 
-app = FastAPI()
-
-VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
+load_dotenv()
 
 
-@app.get("/webhook")
-async def verify(hub_mode: str = Query(None, alias="hub.mode"),
-                 hub_challenge: str = Query(None, alias="hub.challenge"),
-                 hub_verify_token: str = Query(None, alias="hub.verify_token")):
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        return int(hub_challenge)
-    return {"error": "invalid token"}, 403
+def main():
+    app = ApplicationBuilder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    print("Netto bot rodando...")
+    app.run_polling()
 
 
-@app.post("/webhook")
-async def webhook(request: Request):
-    data = await request.json()
-    await handle_message(data)
-    return {"status": "ok"}
+if __name__ == "__main__":
+    main()

@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-httpx
+python-telegram-bot[webhooks]
 google-generativeai
 supabase
 python-dotenv
