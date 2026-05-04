@@ -4,3 +4,4 @@ python-telegram-bot[webhooks]
 google-generativeai
 supabase
 python-dotenv
+cryptography

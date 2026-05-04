@@ -11,8 +11,9 @@ Bot de assistente pessoal no Telegram. Foco inicial em controle financeiro — r
 
 ## Rodar localmente
 
-```bash
-cd armandonettox/projects/netto-bot
+```powershell
+cd C:\Users\armando.netto\armandonettox\projects\netto-bot
+venv\Scripts\activate
 python main.py
 ```
 
