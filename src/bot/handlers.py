@@ -1,9 +1,10 @@
 import re
+from datetime import date, timedelta
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from src.db.database import get_db
 from src.utils.crypto import encrypt
-from src.ai.advisor import categorize
+from src.ai.advisor import categorize, detect_intent
 
 METODOS_PAGAMENTO = ["Credito", "Debito", "Pix", "Dinheiro", "Cheque especial"]
 
@@ -327,7 +328,120 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    intencao = await detect_intent(text)
+    if intencao["intent"] == "resumo":
+        await _enviar_resumo(
+            update,
+            user_id,
+            usuario,
+            intencao["periodo"],
+            intencao.get("data", ""),
+        )
+        return
+
     await update.message.reply_text(
         f"Oi, {apelido}! Para registrar um gasto, me manda algo como:\n_Gastei 50 no mercado_",
         parse_mode="Markdown",
     )
+
+
+_MESES = [
+    "", "Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+]
+
+
+def _intervalo_periodo(periodo: str, data_especifica: str = "") -> tuple[date, date, str]:
+    """Retorna (inicio, fim, titulo) para o periodo solicitado."""
+    hoje = date.today()
+    if periodo == "hoje":
+        return hoje, hoje, f"Hoje ({hoje.strftime('%d/%m/%Y')})"
+    if periodo == "ontem":
+        ontem = hoje - timedelta(days=1)
+        return ontem, ontem, f"Ontem ({ontem.strftime('%d/%m/%Y')})"
+    if periodo == "semana_atual":
+        inicio = hoje - timedelta(days=hoje.weekday())
+        return inicio, hoje, f"Esta semana ({inicio.strftime('%d/%m')} a {hoje.strftime('%d/%m')})"
+    if periodo == "data_especifica" and data_especifica:
+        try:
+            d = date.fromisoformat(data_especifica)
+            return d, d, d.strftime("%d/%m/%Y")
+        except ValueError:
+            pass
+    # padrao: mes_atual
+    inicio = hoje.replace(day=1)
+    return inicio, hoje, f"{_MESES[hoje.month]}/{hoje.year}"
+
+
+async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: str, data_especifica: str = "") -> None:
+    apelido = usuario.get("apelido") or usuario["name"].split()[0]
+    renda = float(usuario["monthly_income"] or 0)
+
+    inicio, fim, titulo = _intervalo_periodo(periodo, data_especifica)
+
+    db = get_db()
+    transacoes = (
+        db.table("transactions")
+        .select("amount, category")
+        .eq("user_id", user_id)
+        .gte("date", inicio.isoformat())
+        .lte("date", fim.isoformat())
+        .execute()
+        .data
+    )
+
+    if not transacoes:
+        await update.message.reply_text(
+            f"Nenhum gasto registrado para o periodo: *{titulo}*.",
+            parse_mode="Markdown",
+        )
+        return
+
+    total = sum(float(t["amount"]) for t in transacoes)
+    saldo = renda - total
+
+    por_categoria: dict[str, float] = {}
+    for t in transacoes:
+        cat = t["category"] or "outros"
+        por_categoria[cat] = por_categoria.get(cat, 0) + float(t["amount"])
+
+    linhas_categorias = "\n".join(
+        f"  • {cat.capitalize()}: *R$ {valor:,.2f}*"
+        for cat, valor in sorted(por_categoria.items(), key=lambda x: x[1], reverse=True)
+    )
+
+    saldo_texto = f"*R$ {saldo:,.2f}*" if saldo >= 0 else f"*-R$ {abs(saldo):,.2f}* (no negativo!)"
+
+    # so mostra renda/saldo no resumo do mes (nao faz sentido para dia ou semana)
+    if periodo in ("mes_atual",):
+        cabecalho = (
+            f"Renda mensal: *R$ {renda:,.2f}*\n"
+            f"Total gasto: *R$ {total:,.2f}*\n"
+            f"Saldo estimado: {saldo_texto}\n\n"
+        )
+    else:
+        cabecalho = f"Total gasto: *R$ {total:,.2f}*\n\n"
+
+    mensagem = (
+        f"Resumo — *{titulo}* — {apelido}\n\n"
+        f"{cabecalho}"
+        f"*Por categoria:*\n{linhas_categorias}"
+    )
+
+    await update.message.reply_text(mensagem, parse_mode="Markdown")
+
+
+async def resumo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    tg_user = update.effective_user
+    telegram_id = str(tg_user.id)
+
+    db = get_db()
+    canal = db.table("user_channels").select("user_id").eq("channel", "telegram").eq("channel_user_id", telegram_id).execute()
+
+    if not canal.data:
+        await update.message.reply_text("Voce ainda nao tem cadastro. Me manda uma mensagem para comecarmos!")
+        return
+
+    user_id = canal.data[0]["user_id"]
+    usuario = db.table("users").select("apelido, name, monthly_income").eq("id", user_id).execute().data[0]
+    await _enviar_resumo(update, user_id, usuario, "mes_atual")
