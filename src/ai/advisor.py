@@ -30,7 +30,7 @@ async def categorize(description: str) -> str:
         f"Responda apenas com o nome da categoria, sem mais nada."
     )
     response = await _get_client().aio.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
     )
     categoria = response.text.strip().lower()

@@ -7,6 +7,25 @@ from src.ai.advisor import categorize
 
 METODOS_PAGAMENTO = ["Credito", "Debito", "Pix", "Dinheiro", "Cheque especial"]
 
+_SINONIMOS_METODO = {
+    "credito": "Credito",
+    "crédito": "Credito",
+    "cartao": "Credito",
+    "cartão": "Credito",
+    "cartao de credito": "Credito",
+    "cartão de crédito": "Credito",
+    "debito": "Debito",
+    "débito": "Debito",
+    "cartao de debito": "Debito",
+    "cartão de débito": "Debito",
+    "pix": "Pix",
+    "dinheiro": "Dinheiro",
+    "especie": "Dinheiro",
+    "espécie": "Dinheiro",
+    "cheque especial": "Cheque especial",
+    "cheque": "Cheque especial",
+}
+
 _GASTO_RE = re.compile(
     r"(?:gastei|paguei|comprei|gastou|pagou)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)",
     re.IGNORECASE,
@@ -251,14 +270,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     etapa = context.user_data.get("gasto_etapa")
 
     if etapa == "aguardando_metodo":
-        metodo = text.strip()
-        if metodo not in METODOS_PAGAMENTO:
+        metodo_digitado = text.strip().lower()
+        metodo = _SINONIMOS_METODO.get(metodo_digitado)
+        if metodo is None:
             teclado = ReplyKeyboardMarkup(
                 [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
                 one_time_keyboard=True,
                 resize_keyboard=True,
             )
-            await update.message.reply_text("Escolha um dos metodos listados:", reply_markup=teclado)
+            await update.message.reply_text("Nao reconheci esse metodo. Escolha um da lista:", reply_markup=teclado)
             return
 
         db = get_db()
