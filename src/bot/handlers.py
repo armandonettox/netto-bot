@@ -352,25 +352,29 @@ _MESES = [
 
 
 def _intervalo_periodo(periodo: str, data_especifica: str = "") -> tuple[date, date, str]:
-    """Retorna (inicio, fim, titulo) para o periodo solicitado."""
+    """Retorna (inicio, fim, titulo) para o periodo solicitado.
+
+    fim sempre recebe +1 dia para compensar fuso UTC do servidor (Koyeb).
+    """
     hoje = date.today()
+    margem = timedelta(days=1)
     if periodo == "hoje":
-        return hoje, hoje, f"Hoje ({hoje.strftime('%d/%m/%Y')})"
+        return hoje, hoje + margem, f"Hoje ({hoje.strftime('%d/%m/%Y')})"
     if periodo == "ontem":
         ontem = hoje - timedelta(days=1)
-        return ontem, ontem, f"Ontem ({ontem.strftime('%d/%m/%Y')})"
+        return ontem, ontem + margem, f"Ontem ({ontem.strftime('%d/%m/%Y')})"
     if periodo == "semana_atual":
         inicio = hoje - timedelta(days=hoje.weekday())
-        return inicio, hoje, f"Esta semana ({inicio.strftime('%d/%m')} a {hoje.strftime('%d/%m')})"
+        return inicio, hoje + margem, f"Esta semana ({inicio.strftime('%d/%m')} a {hoje.strftime('%d/%m')})"
     if periodo == "data_especifica" and data_especifica:
         try:
             d = date.fromisoformat(data_especifica)
-            return d, d, d.strftime("%d/%m/%Y")
+            return d, d + margem, d.strftime("%d/%m/%Y")
         except ValueError:
             pass
     # padrao: mes_atual
     inicio = hoje.replace(day=1)
-    return inicio, hoje, f"{_MESES[hoje.month]}/{hoje.year}"
+    return inicio, hoje + margem, f"{_MESES[hoje.month]}/{hoje.year}"
 
 
 async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: str, data_especifica: str = "") -> None:
