@@ -32,11 +32,14 @@ async def categorize(description: str) -> str:
         f"Gasto: {description}\n"
         f"Responda apenas com o nome da categoria, sem mais nada."
     )
-    response = await _get_client().aio.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
-    categoria = response.text.strip().lower()
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        categoria = response.text.strip().lower()
+    except Exception:
+        return "outros"
     if categoria not in CATEGORIES:
         return "outros"
     return categoria
@@ -61,13 +64,13 @@ async def detect_intent(text: str) -> dict:
         f"Mensagem: {text}\n\n"
         "JSON:"
     )
-    response = await _get_client().aio.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
     try:
+        response = await _get_client().aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
         resultado = json.loads(response.text.strip())
-    except (json.JSONDecodeError, AttributeError):
+    except Exception:
         return {"intent": "desconhecido"}
 
     if resultado.get("intent") != "resumo":

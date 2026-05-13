@@ -32,6 +32,13 @@ _GASTO_RE = re.compile(
     re.IGNORECASE,
 )
 
+_MSG_ERRO = "Ops, algo deu errado por aqui. Tenta de novo em alguns instantes."
+
+
+async def _erro(update: Update, mensagem: str = _MSG_ERRO) -> None:
+    await update.message.reply_text(mensagem)
+
+
 APRESENTACAO = (
     "Ola! Eu sou o *Netto*, seu assistente pessoal.\n\n"
     "Posso te ajudar com:\n"
@@ -231,28 +238,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             apelido = context.user_data["apelido"]
 
             # insere o usuário e recupera o id gerado
-            resultado_insert = db.table("users").insert({
-                "name": context.user_data["nome_completo"],
-                "apelido": apelido,
-                "email": context.user_data["email"],
-                "telefone": context.user_data["telefone"],
-                "data_nascimento": context.user_data["nascimento"],
-                "cpf": context.user_data["cpf"],
-                "profissao": context.user_data["profissao"],
-                "monthly_income": renda,
-                "tg_username": context.user_data["tg_username"],
-                "tg_idioma": context.user_data["tg_idioma"],
-                "tg_premium": context.user_data["tg_premium"],
-            }).execute()
-
-            user_id = resultado_insert.data[0]["id"]
-
-            # vincula o canal telegram ao usuário
-            db.table("user_channels").insert({
-                "user_id": user_id,
-                "channel": "telegram",
-                "channel_user_id": telegram_id,
-            }).execute()
+            try:
+                resultado_insert = db.table("users").insert({
+                    "name": context.user_data["nome_completo"],
+                    "apelido": apelido,
+                    "email": context.user_data["email"],
+                    "telefone": context.user_data["telefone"],
+                    "data_nascimento": context.user_data["nascimento"],
+                    "cpf": context.user_data["cpf"],
+                    "profissao": context.user_data["profissao"],
+                    "monthly_income": renda,
+                    "tg_username": context.user_data["tg_username"],
+                    "tg_idioma": context.user_data["tg_idioma"],
+                    "tg_premium": context.user_data["tg_premium"],
+                }).execute()
+                user_id = resultado_insert.data[0]["id"]
+                db.table("user_channels").insert({
+                    "user_id": user_id,
+                    "channel": "telegram",
+                    "channel_user_id": telegram_id,
+                }).execute()
+            except Exception:
+                await _erro(update, "Nao consegui salvar seu cadastro. Tenta de novo em alguns instantes.")
+                return
 
             context.user_data.clear()
 
@@ -282,14 +290,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Nao reconheci esse metodo. Escolha um da lista:", reply_markup=teclado)
             return
 
-        db = get_db()
-        db.table("transactions").insert({
-            "user_id": user_id,
-            "description": context.user_data["gasto_descricao"],
-            "amount": context.user_data["gasto_valor"],
-            "category": context.user_data["gasto_categoria"],
-            "payment_method": metodo.lower().replace(" ", "_"),
-        }).execute()
+        try:
+            db = get_db()
+            db.table("transactions").insert({
+                "user_id": user_id,
+                "description": context.user_data["gasto_descricao"],
+                "amount": context.user_data["gasto_valor"],
+                "category": context.user_data["gasto_categoria"],
+                "payment_method": metodo.lower().replace(" ", "_"),
+            }).execute()
+        except Exception:
+            await _erro(update, "Nao consegui salvar o gasto. Tenta de novo em alguns instantes.")
+            context.user_data.clear()
+            return
 
         valor = context.user_data["gasto_valor"]
         categoria = context.user_data["gasto_categoria"]
@@ -309,7 +322,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if match:
         valor_str = match.group(1).replace(",", ".")
         valor = float(valor_str)
-        categoria = await categorize(text)
+        try:
+            categoria = await categorize(text)
+        except Exception:
+            categoria = "outros"
 
         context.user_data["gasto_etapa"] = "aguardando_metodo"
         context.user_data["gasto_descricao"] = text
@@ -383,16 +399,20 @@ async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: s
 
     inicio, fim, titulo = _intervalo_periodo(periodo, data_especifica)
 
-    db = get_db()
-    transacoes = (
-        db.table("transactions")
-        .select("amount, category")
-        .eq("user_id", user_id)
-        .gte("date", inicio.isoformat())
-        .lte("date", fim.isoformat())
-        .execute()
-        .data
-    )
+    try:
+        db = get_db()
+        transacoes = (
+            db.table("transactions")
+            .select("amount, category")
+            .eq("user_id", user_id)
+            .gte("date", inicio.isoformat())
+            .lte("date", fim.isoformat())
+            .execute()
+            .data
+        )
+    except Exception:
+        await _erro(update)
+        return
 
     if not transacoes:
         await update.message.reply_text(
@@ -447,5 +467,13 @@ async def resumo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     user_id = canal.data[0]["user_id"]
-    usuario = db.table("users").select("apelido, name, monthly_income").eq("id", user_id).execute().data[0]
+    try:
+        resultado = db.table("users").select("apelido, name, monthly_income").eq("id", user_id).execute()
+        if not resultado.data:
+            await _erro(update, "Nao encontrei seus dados. Tenta de novo em alguns instantes.")
+            return
+        usuario = resultado.data[0]
+    except Exception:
+        await _erro(update)
+        return
     await _enviar_resumo(update, user_id, usuario, "mes_atual")
