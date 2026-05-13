@@ -1,8 +1,16 @@
 import re
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from src.db.database import get_db
 from src.utils.crypto import encrypt
+from src.ai.advisor import categorize
+
+METODOS_PAGAMENTO = ["Credito", "Debito", "Pix", "Dinheiro", "Cheque especial"]
+
+_GASTO_RE = re.compile(
+    r"(?:gastei|paguei|comprei|gastou|pagou)\s+(?:r\$\s*)?(\d+(?:[.,]\d{1,2})?)",
+    re.IGNORECASE,
+)
 
 APRESENTACAO = (
     "Ola! Eu sou o *Netto*, seu assistente pessoal.\n\n"
@@ -238,5 +246,68 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Usuario ja cadastrado
-    await update.message.reply_text(f"Entendido, {usuario['name']}! Em breve processo isso.")
+    # Usuario ja cadastrado — fluxo de registro de gasto
+    apelido = usuario.get("apelido") or usuario["name"].split()[0]
+    etapa = context.user_data.get("gasto_etapa")
+
+    if etapa == "aguardando_metodo":
+        metodo = text.strip()
+        if metodo not in METODOS_PAGAMENTO:
+            teclado = ReplyKeyboardMarkup(
+                [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
+                one_time_keyboard=True,
+                resize_keyboard=True,
+            )
+            await update.message.reply_text("Escolha um dos metodos listados:", reply_markup=teclado)
+            return
+
+        db = get_db()
+        db.table("transactions").insert({
+            "user_id": user_id,
+            "description": context.user_data["gasto_descricao"],
+            "amount": context.user_data["gasto_valor"],
+            "category": context.user_data["gasto_categoria"],
+            "payment_method": metodo.lower().replace(" ", "_"),
+        }).execute()
+
+        valor = context.user_data["gasto_valor"]
+        categoria = context.user_data["gasto_categoria"]
+        context.user_data.clear()
+
+        await update.message.reply_text(
+            f"Gasto registrado!\n\n"
+            f"Valor: *R$ {valor:,.2f}*\n"
+            f"Categoria: {categoria}\n"
+            f"Pagamento: {metodo}",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        return
+
+    match = _GASTO_RE.search(text)
+    if match:
+        valor_str = match.group(1).replace(",", ".")
+        valor = float(valor_str)
+        categoria = await categorize(text)
+
+        context.user_data["gasto_etapa"] = "aguardando_metodo"
+        context.user_data["gasto_descricao"] = text
+        context.user_data["gasto_valor"] = valor
+        context.user_data["gasto_categoria"] = categoria
+
+        teclado = ReplyKeyboardMarkup(
+            [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
+            one_time_keyboard=True,
+            resize_keyboard=True,
+        )
+        await update.message.reply_text(
+            f"Entendido! *R$ {valor:,.2f}* em _{categoria}_.\nQual foi o metodo de pagamento?",
+            parse_mode="Markdown",
+            reply_markup=teclado,
+        )
+        return
+
+    await update.message.reply_text(
+        f"Oi, {apelido}! Para registrar um gasto, me manda algo como:\n_Gastei 50 no mercado_",
+        parse_mode="Markdown",
+    )
