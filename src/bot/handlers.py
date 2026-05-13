@@ -558,7 +558,7 @@ async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: s
         "periodo": titulo,
     })
     if dica:
-        await update.message.reply_text(f"💡 {dica}")
+        await update.message.reply_text(dica)
 
 
 async def resumo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
