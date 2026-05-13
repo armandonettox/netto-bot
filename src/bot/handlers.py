@@ -277,6 +277,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Usuario ja cadastrado — fluxo de registro de gasto
     apelido = usuario.get("apelido") or usuario["name"].split()[0]
     etapa = context.user_data.get("gasto_etapa")
+    fixo_etapa = context.user_data.get("fixo_etapa")
+
+    if fixo_etapa == "aguardando_confirmacao":
+        if _eh_confirmacao(text):
+            descricao = context.user_data["fixo_descricao"]
+            valor = context.user_data["fixo_valor"]
+            dia = context.user_data["fixo_dia"]
+            context.user_data.clear()
+            categoria = await categorize(descricao)
+            try:
+                db = get_db()
+                db.table("fixed_expenses").insert({
+                    "user_id": user_id,
+                    "description": descricao,
+                    "amount": valor,
+                    "due_day": dia,
+                    "category": categoria,
+                }).execute()
+            except Exception:
+                await _erro(update, "Nao consegui salvar o gasto fixo. Tenta de novo em alguns instantes.")
+                return
+            dia_texto = f"todo dia *{dia}*" if dia else "sem data de vencimento"
+            await update.message.reply_text(
+                f"Gasto fixo cadastrado!\n\n"
+                f"Nome: *{descricao.capitalize()}*\n"
+                f"Valor: *R$ {valor:,.2f}*\n"
+                f"Vencimento: {dia_texto}\n"
+                f"Categoria: {categoria}",
+                parse_mode="Markdown",
+            )
+        else:
+            context.user_data.clear()
+            await update.message.reply_text("Tudo bem, nao salvei nada.")
+        return
 
     if etapa == "aguardando_metodo":
         metodo_digitado = text.strip().lower()
@@ -345,6 +379,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     intencao = await detect_intent(text)
+
     if intencao["intent"] == "resumo":
         await _enviar_resumo(
             update,
@@ -355,10 +390,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if intencao["intent"] == "cadastrar_fixo":
+        descricao = intencao["descricao"]
+        valor = intencao["valor"]
+        dia = intencao.get("dia_vencimento")
+
+        context.user_data["fixo_etapa"] = "aguardando_confirmacao"
+        context.user_data["fixo_descricao"] = descricao
+        context.user_data["fixo_valor"] = valor
+        context.user_data["fixo_dia"] = dia
+
+        dia_texto = f"todo dia *{dia}*" if dia else "sem dia de vencimento definido"
+        await update.message.reply_text(
+            f"Vou cadastrar o seguinte gasto fixo:\n\n"
+            f"Nome: *{descricao.capitalize()}*\n"
+            f"Valor: *R$ {valor:,.2f}*\n"
+            f"Vencimento: {dia_texto}\n\n"
+            "Confirma? (sim / nao)",
+            parse_mode="Markdown",
+        )
+        return
+
+    if intencao["intent"] == "listar_fixos":
+        await _listar_fixos(update, user_id, apelido)
+        return
+
     await update.message.reply_text(
         f"Oi, {apelido}! Para registrar um gasto, me manda algo como:\n_Gastei 50 no mercado_",
         parse_mode="Markdown",
     )
+
+
+async def _listar_fixos(update: Update, user_id: str, apelido: str) -> None:
+    try:
+        db = get_db()
+        fixos = (
+            db.table("fixed_expenses")
+            .select("description, amount, due_day, category")
+            .eq("user_id", user_id)
+            .order("due_day", desc=False, nullsfirst=False)
+            .execute()
+            .data
+        )
+    except Exception:
+        await _erro(update)
+        return
+
+    if not fixos:
+        await update.message.reply_text(
+            "Voce ainda nao tem gastos fixos cadastrados.\n\n"
+            "Me manda algo como:\n_Tenho aluguel de 1200 todo dia 5_",
+            parse_mode="Markdown",
+        )
+        return
+
+    total = sum(float(f["amount"]) for f in fixos)
+    linhas = []
+    for f in fixos:
+        dia = f"dia {f['due_day']}" if f["due_day"] else "sem vencimento"
+        linhas.append(f"  • *{f['description'].capitalize()}* — R$ {float(f['amount']):,.2f} ({dia})")
+
+    mensagem = (
+        f"Gastos fixos — {apelido}\n\n"
+        + "\n".join(linhas)
+        + f"\n\n*Total mensal: R$ {total:,.2f}*"
+    )
+    await update.message.reply_text(mensagem, parse_mode="Markdown")
 
 
 _MESES = [
