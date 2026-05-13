@@ -131,5 +131,39 @@ async def detect_intent(text: str) -> dict:
 
 
 async def get_financial_tip(summary: dict) -> str:
-    # TODO: gerar dica financeira baseada no resumo do usuário
-    pass
+    """Gera uma dica financeira personalizada com base no resumo do usuario.
+
+    summary deve conter:
+      - total: float — total gasto no periodo
+      - renda: float — renda mensal (0 se nao disponivel)
+      - categorias: dict[str, float] — gastos por categoria
+      - periodo: str — descricao do periodo (ex: "Maio/2026")
+    """
+    categorias_texto = "\n".join(
+        f"  - {cat}: R$ {valor:,.2f}" for cat, valor in summary["categorias"].items()
+    )
+    renda = summary.get("renda", 0)
+    renda_texto = f"Renda mensal: R$ {renda:,.2f}" if renda else "Renda mensal: nao informada"
+
+    prompt = (
+        "Voce e um assistente financeiro pessoal brasileiro, direto e amigavel.\n"
+        "Com base no resumo de gastos abaixo, gere UMA dica financeira curta e pratica.\n\n"
+        "Regras:\n"
+        "- Maximo 3 linhas\n"
+        "- Tom amigavel, sem julgamentos\n"
+        "- Foco na categoria com maior gasto ou no saldo disponivel\n"
+        "- Nao repita os numeros do resumo, so use-os para embasar a dica\n"
+        "- Responda apenas a dica, sem titulo, sem introducao\n\n"
+        f"Periodo: {summary['periodo']}\n"
+        f"{renda_texto}\n"
+        f"Total gasto: R$ {summary['total']:,.2f}\n"
+        f"Por categoria:\n{categorias_texto}\n"
+    )
+    try:
+        response = await _get_client().aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        return response.text.strip()
+    except Exception:
+        return ""

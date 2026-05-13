@@ -4,7 +4,7 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from src.db.database import get_db
 from src.utils.crypto import encrypt
-from src.ai.advisor import categorize, detect_intent
+from src.ai.advisor import categorize, detect_intent, get_financial_tip
 
 METODOS_PAGAMENTO = ["Credito", "Debito", "Pix", "Dinheiro", "Cheque especial"]
 
@@ -550,6 +550,15 @@ async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: s
     )
 
     await update.message.reply_text(mensagem, parse_mode="Markdown")
+
+    dica = await get_financial_tip({
+        "total": total,
+        "renda": renda,
+        "categorias": por_categoria,
+        "periodo": titulo,
+    })
+    if dica:
+        await update.message.reply_text(f"💡 {dica}")
 
 
 async def resumo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
