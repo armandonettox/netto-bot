@@ -14,10 +14,12 @@ Receber mensagens de gastos pelo Telegram, categorizar automaticamente com IA e 
 - [x] Registro de gastos livres ("Gastei 50 no mercado")
 - [x] Categorizacao automatica via Gemini 2.5 Flash
 - [x] Selecao de metodo de pagamento (credito, debito, pix, dinheiro, cheque especial)
-- [ ] Registro de gastos fixos
-- [ ] Resumo mensal (`/resumo`)
-- [ ] Dicas financeiras personalizadas
-- [ ] Deploy no Koyeb
+- [x] Resumo de gastos por periodo via linguagem natural (mes, semana, dia, data especifica)
+- [x] Registro de gastos fixos com vencimento via linguagem natural
+- [x] Listagem de gastos fixos com total mensal
+- [x] Dicas financeiras personalizadas via Gemini apos resumo
+- [x] Tratamento de erros amigavel em todos os fluxos criticos
+- [ ] Deploy para rodar 24h
 
 ## Stack
 
@@ -80,12 +82,9 @@ SQL completo de criacao em [src/db/create_tables.sql](src/db/create_tables.sql).
 
 ## Proximos passos
 
-- [ ] Comando `/resumo` — visao do mes (total gasto, por categoria, saldo)
-- [ ] Registro de gastos fixos com vencimento
-- [ ] Dicas financeiras personalizadas via Gemini
-- [ ] Tratamento de erros amigavel para o usuario (mensagens no bot em vez de silencio)
-- [ ] Deploy no Koyeb para rodar 24h
+- [ ] Deploy para rodar 24h sem depender do computador ligado
+- [ ] Fase 2: integracao com Google Calendar (ver compromissos, criar eventos, lembretes)
 
 ## Status
 
-Em desenvolvimento — fase 1 (controle financeiro basico) em andamento.
+Fase 1 (controle financeiro) concluida. Rodando localmente.
