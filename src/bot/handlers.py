@@ -4,7 +4,7 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ContextTypes
 from src.db.database import get_db
 from src.utils.crypto import encrypt
-from src.ai.advisor import categorize, detect_intent, get_financial_tip
+from src.ai.advisor import categorize, detect_intent, get_financial_tip, extract_from_image, transcribe_and_detect_intent
 
 METODOS_PAGAMENTO = ["Credito", "Debito", "Pix", "Dinheiro", "Cheque especial"]
 
@@ -104,7 +104,8 @@ def _eh_confirmacao(text: str) -> bool:
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
     telegram_id = str(tg_user.id)
-    text = update.message.text.strip()
+    voice_intent = context.user_data.pop("_voice_intent", None)
+    text = (voice_intent or {}).get("transcricao") or (update.message.text or "").strip()
 
     db = get_db()
     # busca o usuário pelo canal telegram na tabela user_channels
@@ -352,33 +353,58 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    match = _GASTO_RE.search(text)
-    if match:
-        valor_str = match.group(1).replace(",", ".")
-        valor = float(valor_str)
+    intencao = voice_intent if voice_intent else await detect_intent(text)
+
+    if intencao["intent"] == "gasto_livre":
+        valor = intencao["valor"]
+        descricao = intencao["descricao"]
+        metodo_detectado = intencao.get("metodo")
+
         try:
-            categoria = await categorize(text)
+            categoria = await categorize(descricao)
         except Exception:
             categoria = "outros"
 
-        context.user_data["gasto_etapa"] = "aguardando_metodo"
-        context.user_data["gasto_descricao"] = text
+        context.user_data["gasto_descricao"] = descricao
         context.user_data["gasto_valor"] = valor
         context.user_data["gasto_categoria"] = categoria
 
-        teclado = ReplyKeyboardMarkup(
-            [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
-            one_time_keyboard=True,
-            resize_keyboard=True,
-        )
-        await update.message.reply_text(
-            f"Entendido! *R$ {valor:,.2f}* em _{categoria}_.\nQual foi o metodo de pagamento?",
-            parse_mode="Markdown",
-            reply_markup=teclado,
-        )
+        # se o metodo ja foi mencionado, salva direto sem perguntar
+        metodo_normalizado = _SINONIMOS_METODO.get(metodo_detectado or "")
+        if metodo_normalizado:
+            try:
+                db.table("transactions").insert({
+                    "user_id": user_id,
+                    "description": descricao,
+                    "amount": valor,
+                    "category": categoria,
+                    "payment_method": metodo_normalizado.lower().replace(" ", "_"),
+                }).execute()
+            except Exception:
+                await _erro(update, "Nao consegui salvar o gasto. Tenta de novo em alguns instantes.")
+                context.user_data.clear()
+                return
+            context.user_data.clear()
+            await update.message.reply_text(
+                f"Gasto registrado!\n\n"
+                f"Valor: *R$ {valor:,.2f}*\n"
+                f"Categoria: {categoria}\n"
+                f"Pagamento: {metodo_normalizado}",
+                parse_mode="Markdown",
+            )
+        else:
+            context.user_data["gasto_etapa"] = "aguardando_metodo"
+            teclado = ReplyKeyboardMarkup(
+                [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
+                one_time_keyboard=True,
+                resize_keyboard=True,
+            )
+            await update.message.reply_text(
+                f"Entendido! *R$ {valor:,.2f}* em _{categoria}_.\nQual foi o metodo de pagamento?",
+                parse_mode="Markdown",
+                reply_markup=teclado,
+            )
         return
-
-    intencao = await detect_intent(text)
 
     if intencao["intent"] == "resumo":
         await _enviar_resumo(
@@ -559,6 +585,102 @@ async def _enviar_resumo(update: Update, user_id: int, usuario: dict, periodo: s
     })
     if dica:
         await update.message.reply_text(dica)
+
+
+async def _get_user_from_update(update: Update, db) -> tuple[str | None, dict | None]:
+    """Retorna (user_id, usuario) para o remetente ou (None, None) se nao cadastrado."""
+    telegram_id = str(update.effective_user.id)
+    canal = db.table("user_channels").select("user_id").eq("channel", "telegram").eq("channel_user_id", telegram_id).execute()
+    if not canal.data:
+        return None, None
+    user_id = canal.data[0]["user_id"]
+    resultado = db.table("users").select("id, name, apelido, monthly_income").eq("id", user_id).execute()
+    usuario = resultado.data[0] if resultado.data else None
+    return user_id, usuario
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        db = get_db()
+        user_id, usuario = await _get_user_from_update(update, db)
+
+        if usuario is None:
+            await update.message.reply_text("Voce ainda nao tem cadastro. Me manda uma mensagem de texto para comecarmos!")
+            return
+
+        await update.message.reply_text("Analisando a imagem...")
+
+        foto = update.message.photo[-1]
+        arquivo = await foto.get_file()
+        image_bytes = await arquivo.download_as_bytearray()
+
+        resultado = await extract_from_image(bytes(image_bytes))
+        if resultado is None:
+            await update.message.reply_text(
+                "Nao consegui identificar o valor nessa imagem.\n"
+                "Tente uma foto mais nitida da nota fiscal ou cupom."
+            )
+            return
+    except Exception as e:
+        await update.message.reply_text(f"Erro ao processar imagem: {e}")
+        return
+
+    valor = resultado["valor"]
+    descricao = resultado["descricao"]
+
+    try:
+        categoria = await categorize(descricao)
+    except Exception:
+        categoria = "outros"
+
+    context.user_data["gasto_etapa"] = "aguardando_metodo"
+    context.user_data["gasto_descricao"] = descricao
+    context.user_data["gasto_valor"] = valor
+    context.user_data["gasto_categoria"] = categoria
+
+    teclado = ReplyKeyboardMarkup(
+        [METODOS_PAGAMENTO[:3], METODOS_PAGAMENTO[3:]],
+        one_time_keyboard=True,
+        resize_keyboard=True,
+    )
+    await update.message.reply_text(
+        f"Encontrei na nota:\n\n"
+        f"Descricao: *{descricao}*\n"
+        f"Valor: *R$ {valor:,.2f}*\n"
+        f"Categoria: _{categoria}_\n\n"
+        "Qual foi o metodo de pagamento?",
+        parse_mode="Markdown",
+        reply_markup=teclado,
+    )
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db = get_db()
+    user_id, usuario = await _get_user_from_update(update, db)
+
+    if usuario is None:
+        await update.message.reply_text("Voce ainda nao tem cadastro. Me manda uma mensagem de texto para comecarmos!")
+        return
+
+    await update.message.reply_text("Transcrevendo o audio...")
+
+    voice = update.message.voice
+    arquivo = await voice.get_file()
+    audio_bytes = await arquivo.download_as_bytearray()
+
+    resultado = await transcribe_and_detect_intent(bytes(audio_bytes), mime_type="audio/ogg")
+    transcricao = resultado.get("transcricao")
+
+    if not transcricao:
+        await update.message.reply_text(
+            "Nao consegui entender o audio. Tenta mandar uma mensagem de texto ou gravar novamente."
+        )
+        return
+
+    await update.message.reply_text(f'Entendi: _"{transcricao}"_\n\nProcessando...', parse_mode="Markdown")
+
+    context.user_data["_voice_intent"] = resultado
+    await handle_message(update, context)
 
 
 async def resumo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

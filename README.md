@@ -1,6 +1,6 @@
 # netto-bot
 
-Bot de assistente pessoal no Telegram com foco em controle financeiro. Recebe mensagens em linguagem natural, categoriza gastos com IA e fornece dicas personalizadas.
+Bot de assistente pessoal no Telegram com foco em controle financeiro. Aceita texto, audio e fotos de nota fiscal. Categoriza gastos com IA e fornece dicas personalizadas.
 
 ## Como funciona
 
@@ -22,11 +22,21 @@ Mensagens como "tenho aluguel de 1200 todo dia 5" ou "plano de saude 300 vence d
 
 O usuario pode pedir "resumo do mes", "quanto gastei essa semana", "gastos de ontem" ou uma data especifica. O Gemini interpreta o periodo, o bot busca as transacoes no banco e monta um resumo por categoria. Ao final, o Gemini gera dicas financeiras personalizadas com base no perfil e nos gastos do periodo.
 
+### Fotos de nota fiscal e cupom
+
+O usuario pode mandar uma foto de nota fiscal ou cupom. O Gemini extrai o valor total e o estabelecimento automaticamente. O bot categoriza e pede o metodo de pagamento para confirmar.
+
+### Mensagens de voz
+
+O usuario pode gravar um audio descrevendo um gasto ("Gastei dez reais em dinheiro com agua de coco"). O Gemini transcreve e detecta a intencao em uma unica chamada, economizando cota do free tier. Se o metodo de pagamento for mencionado no audio, o gasto e salvo diretamente.
+
 ### Categorizacao com IA
 
 O Gemini 2.5 Flash e usado para:
 - Detectar a intencao da mensagem (gasto livre, gasto fixo, resumo, listagem)
 - Categorizar o gasto automaticamente (alimentacao, transporte, saude etc.)
+- Extrair valor e descricao de imagens de nota fiscal
+- Transcrever e interpretar mensagens de voz em uma unica chamada
 - Gerar dicas financeiras personalizadas apos o resumo
 
 ## Stack
@@ -59,7 +69,7 @@ src/
     models.py       # documentacao das tabelas
     create_tables.sql
   ai/
-    advisor.py      # chamadas ao Gemini: categorizar, detectar intencao, gerar dicas
+    advisor.py      # chamadas ao Gemini: categorizar, detectar intencao, extrair de imagem, transcrever audio, gerar dicas
   utils/
     crypto.py       # encriptacao e decriptacao Fernet para dados sensiveis
 main.py             # entry point — inicia o polling do Telegram
@@ -107,4 +117,4 @@ ssh -i "C:\Users\armando.netto\Downloads\ssh-key-2026-05-16.key" opc@163.176.255
 
 ## Status
 
-Fase 1 (controle financeiro) concluida e rodando em producao na Oracle Cloud.
+Fase 1 (controle financeiro) e Fase 1.5 (reconhecimento de imagem e audio) concluidas e rodando em producao na Oracle Cloud.
