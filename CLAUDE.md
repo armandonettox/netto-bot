@@ -7,7 +7,7 @@ Bot de assistente pessoal no Telegram. Foco inicial em controle financeiro — r
 - **Bot:** Python + python-telegram-bot
 - **IA:** Google Gemini API (free tier)
 - **Banco:** Supabase (PostgreSQL, free tier)
-- **Deploy:** Koyeb (free tier, sem sleep)
+- **Deploy:** Oracle Cloud Always Free — VM Ampere A1 (1 OCPU, 6 GB RAM), IP: 163.176.255.189
 
 ## Rodar localmente
 
@@ -52,18 +52,18 @@ Script de criação em `src/db/models.py` (comentários com o SQL completo).
 
 ## Fluxo atual
 
-1. Primeiro acesso → bot se apresenta e coleta nome + renda mensal
-2. Usuário cadastrado → ecoa mensagem (próximo: categorizar gastos)
+1. Primeiro acesso → cadastro em etapas (nome, apelido, email, telefone, CPF, profissao, renda)
+2. Usuario cadastrado → Gemini detecta intencao da mensagem e roteia para o handler correto
+3. Gastos livres → Gemini categoriza, usuario confirma, salva em `transactions`
+4. Gastos fixos → Gemini extrai valor e vencimento, salva em `fixed_expenses`
+5. Resumo → busca transacoes por periodo, monta resumo por categoria, Gemini gera dicas
 
-## Próximos passos
+## Deploy
 
-- [ ] Criar tabelas no Supabase (rodar SQL do models.py)
-- [ ] Implementar registro de gastos livres ("Gastei 50 no mercado")
-- [ ] Integrar Gemini para categorização automática
-- [ ] Implementar `/resumo` — visão do mês
-- [ ] Implementar registro de gastos fixos
-- [ ] Dicas financeiras via Gemini
-- [ ] Deploy no Koyeb
+- VM Oracle Cloud: `163.176.255.189` (usuario: `opc`)
+- Chave SSH: `C:\Users\armando.netto\Downloads\ssh-key-2026-05-16.key`
+- Container rodando com `--restart unless-stopped`
+- Servico systemd `netto-bot` configurado para subir com a VM
 
 ## Commits
 
